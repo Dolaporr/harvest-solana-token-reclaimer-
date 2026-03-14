@@ -14,7 +14,7 @@
 //   empty     → scan returned 0 empty accounts
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -27,6 +27,8 @@ import {
   Zap,
   Info,
 } from "lucide-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTokenAccounts } from "@/hooks/useTokenAccounts";
 import { useReclaimAccounts } from "@/hooks/useReclaimAccounts";
@@ -35,6 +37,9 @@ import { CLOSE_ACCOUNTS_BATCH_SIZE, EXPLORER_BASE } from "@/lib/constants";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
+  const { connected } = useWallet();
+  const { setVisible } = useWalletModal();
+
   const {
     accounts,
     scanning,
@@ -56,9 +61,21 @@ const Dashboard = () => {
   const [started, setStarted] = useState(false);
 
   const handleScan = async () => {
+    if (!connected) {
+      setVisible(true);
+      return;
+    }
     setStarted(true);
     await scan();
   };
+
+  useEffect(() => {
+    if (!connected) {
+      reset();
+      clearResult();
+      setStarted(false);
+    }
+  }, [connected, reset, clearResult]);
 
   const handleReclaim = async () => {
     try {
