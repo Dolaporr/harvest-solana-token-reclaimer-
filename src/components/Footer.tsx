@@ -27,7 +27,7 @@ const Footer = () => {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <p className="font-display font-semibold text-lg text-foreground">
-              Support the project ejeh, tip here abeg
+              Support the project.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Copy the wallet address and send a tip if you like what you see sir.

@@ -213,7 +213,7 @@ const Dashboard = () => {
                   No empty token accounts found in this wallet.
                 </p>
                 <p className="text-sm text-secondary font-semibold mt-2">
-                  You no dey hustle at all? See as your wallet empty.
+                  Buy more tickers man.
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row items-center gap-3">
