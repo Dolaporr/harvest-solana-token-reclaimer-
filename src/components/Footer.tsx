@@ -1,20 +1,20 @@
 // src/components/Footer.tsx
-// Simple tip jar footer with copy-to-clipboard wallet address.
+// Simple footer with copy-to-clipboard contract address.
 
 import { useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 
-const TIP_WALLET_ADDRESS = "4Yj9c5onRTYGVTYPynBKx73phEFKckeSfF2GZfPExfYb";
+const HARVEST_CONTRACT_ADDRESS = "eTmonX1jgecCgfbTn85drHJTqNHwWHgFJEYmL9gpump";
 
 const Footer = () => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(TIP_WALLET_ADDRESS);
+      await navigator.clipboard.writeText(HARVEST_CONTRACT_ADDRESS);
       setCopied(true);
-      toast.success("Wallet address copied");
+      toast.success("Contract address copied");
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error("Copy failed. Please copy manually.");
@@ -30,20 +30,17 @@ const Footer = () => {
               Support the project.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Copy the wallet address and send a tip if you like what you see sir.
+              You can support the project by getting $HARVEST.
             </p>
           </div>
 
           <button
             onClick={handleCopy}
-            className="w-full sm:w-auto flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all font-medium text-sm"
-            aria-label="Copy tip wallet address"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all font-medium text-sm"
+            aria-label="Copy contract address"
           >
-            <span className="font-mono text-xs sm:text-sm break-all">
-              {TIP_WALLET_ADDRESS}
-            </span>
             {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? "Copied" : "Copy"}
+            {copied ? "Contract Copied" : "Copy Contract Address"}
           </button>
         </div>
       </div>
