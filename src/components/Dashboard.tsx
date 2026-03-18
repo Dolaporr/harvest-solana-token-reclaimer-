@@ -14,7 +14,7 @@
 //   empty     → scan returned 0 empty accounts
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -33,6 +33,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useTokenAccounts } from "@/hooks/useTokenAccounts";
 import { useReclaimAccounts } from "@/hooks/useReclaimAccounts";
 import { CLOSE_ACCOUNTS_BATCH_SIZE, EXPLORER_BASE } from "@/lib/constants";
+import { trackEvent } from "@/lib/analytics";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -59,12 +60,15 @@ const Dashboard = () => {
 
   // Track whether the initial "idle" state has been left
   const [started, setStarted] = useState(false);
+  const prevConnected = useRef(connected);
+  const lastReclaimId = useRef<string>("");
 
   const handleScan = async () => {
     if (!connected) {
       setVisible(true);
       return;
     }
+    trackEvent("scan_started");
     setStarted(true);
     await scan();
   };
@@ -77,8 +81,16 @@ const Dashboard = () => {
     }
   }, [connected, reset, clearResult]);
 
+  useEffect(() => {
+    if (connected && !prevConnected.current) {
+      trackEvent("wallet_connected");
+    }
+    prevConnected.current = connected;
+  }, [connected]);
+
   const handleReclaim = async () => {
     try {
+      trackEvent("reclaim_started", { accounts: selected.length });
       const reclaimResult = await reclaim(selected);
       // Remove closed accounts from list so the remaining ones (if any) are shown
       removeAccounts(new Set(selected.map((a) => a.id)));
@@ -89,6 +101,17 @@ const Dashboard = () => {
       // Errors are already surfaced via Sonner toasts in the hook.
     }
   };
+
+  useEffect(() => {
+    if (!result) return;
+    const id = result.signatures.join("|");
+    if (!id || id === lastReclaimId.current) return;
+    lastReclaimId.current = id;
+    trackEvent("reclaim_complete", {
+      accounts: result.closedCount,
+      transactions: result.signatures.length,
+    });
+  }, [result]);
 
   // How many tx batches will be needed
   const batchCount = Math.ceil(selected.length / CLOSE_ACCOUNTS_BATCH_SIZE);

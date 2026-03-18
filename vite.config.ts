@@ -30,6 +30,7 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      buffer: "buffer/",
     },
   },
   define: {
@@ -40,6 +41,7 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: {
     // Pre-bundle heavy Solana packages so HMR stays fast
     include: [
+      "buffer",
       "@solana/web3.js",
       "@solana/spl-token",
       "@solana/wallet-adapter-react",

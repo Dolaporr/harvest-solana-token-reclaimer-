@@ -6,11 +6,12 @@
 // this import provides it in the browser via the 'buffer' npm package.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Buffer } from "buffer";
-(window as Window & { Buffer?: typeof Buffer }).Buffer = Buffer;
-
+import "./polyfills";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
+import { initAnalytics } from "./lib/analytics";
 import "./index.css";
+
+initAnalytics();
 
 createRoot(document.getElementById("root")!).render(<App />);
