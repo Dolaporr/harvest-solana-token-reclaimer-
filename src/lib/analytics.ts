@@ -10,18 +10,13 @@ declare global {
   }
 }
 
-const PLAUSIBLE_DOMAIN = import.meta.env.VITE_PLAUSIBLE_DOMAIN as
-  | string
-  | undefined;
-const PLAUSIBLE_SRC =
-  (import.meta.env.VITE_PLAUSIBLE_SRC as string | undefined) ||
-  "https://plausible.io/js/script.js";
-
 export function initAnalytics() {
-  if (!PLAUSIBLE_DOMAIN) return;
   if (typeof document === "undefined") return;
+  if (typeof window !== "undefined" && typeof window.plausible === "function") {
+    return;
+  }
 
-  if (typeof window !== "undefined" && typeof window.plausible !== "function") {
+  if (typeof window !== "undefined") {
     const stub = (...args: unknown[]) => {
       const queue = (stub as { q?: unknown[] }).q || [];
       queue.push(args);
@@ -29,16 +24,6 @@ export function initAnalytics() {
     };
     window.plausible = stub as Window["plausible"];
   }
-
-  const existing = document.querySelector("script[data-plausible]");
-  if (existing) return;
-
-  const script = document.createElement("script");
-  script.defer = true;
-  script.src = PLAUSIBLE_SRC;
-  script.dataset.domain = PLAUSIBLE_DOMAIN;
-  script.dataset.plausible = "true";
-  document.head.appendChild(script);
 }
 
 export function trackEvent(event: string, props?: PlausibleProps) {
