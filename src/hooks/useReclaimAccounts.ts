@@ -34,7 +34,11 @@ export function useReclaimAccounts() {
 
   const [reclaiming, setReclaiming] = useState(false);
   const [result, setResult] = useState<ReclaimResult | null>(null);
+  const [simulationStatus, setSimulationStatus] = useState<
+    "idle" | "running" | "passed" | "failed"
+  >("idle");
   const clearResult = useCallback(() => setResult(null), []);
+  const resetSimulation = useCallback(() => setSimulationStatus("idle"), []);
 
   const reclaim = useCallback(
     async (selectedAccounts: DisplayAccount[]): Promise<ReclaimResult> => {
@@ -81,9 +85,16 @@ export function useReclaimAccounts() {
           { id: toastId }
         );
 
-        await Promise.all(
-          transactions.map((tx) => simulateTx(connection, tx))
-        );
+        setSimulationStatus("running");
+        try {
+          await Promise.all(
+            transactions.map((tx) => simulateTx(connection, tx))
+          );
+          setSimulationStatus("passed");
+        } catch (err) {
+          setSimulationStatus("failed");
+          throw err;
+        }
 
         // ── Step 4: Request wallet signatures ───────────────────────────────
         // signAllTransactions batches all transactions into a SINGLE wallet
@@ -184,5 +195,12 @@ export function useReclaimAccounts() {
     [connection, publicKey, signAllTransactions]
   );
 
-  return { reclaim, reclaiming, result, clearResult };
+  return {
+    reclaim,
+    reclaiming,
+    result,
+    clearResult,
+    simulationStatus,
+    resetSimulation,
+  };
 }

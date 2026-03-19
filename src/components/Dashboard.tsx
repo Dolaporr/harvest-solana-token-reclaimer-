@@ -14,8 +14,8 @@
 //   empty     → scan returned 0 empty accounts
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { motion, AnimatePresence, animate } from "framer-motion";
 import {
   Search,
   Coins,
@@ -26,19 +26,24 @@ import {
   ExternalLink,
   Zap,
   Info,
+  Download,
+  ShieldCheck,
 } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import html2canvas from "html2canvas";
+import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTokenAccounts } from "@/hooks/useTokenAccounts";
 import { useReclaimAccounts } from "@/hooks/useReclaimAccounts";
 import { CLOSE_ACCOUNTS_BATCH_SIZE, EXPLORER_BASE } from "@/lib/constants";
 import { trackEvent } from "@/lib/analytics";
+import ShareCard from "@/components/ShareCard";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
-  const { connected } = useWallet();
+  const { connected, publicKey } = useWallet();
   const { setVisible } = useWalletModal();
 
   const {
@@ -56,12 +61,21 @@ const Dashboard = () => {
     allSelected,
   } = useTokenAccounts();
 
-  const { reclaim, reclaiming, result, clearResult } = useReclaimAccounts();
+  const {
+    reclaim,
+    reclaiming,
+    result,
+    clearResult,
+    simulationStatus,
+    resetSimulation,
+  } = useReclaimAccounts();
 
   // Track whether the initial "idle" state has been left
   const [started, setStarted] = useState(false);
   const prevConnected = useRef(connected);
   const lastReclaimId = useRef<string>("");
+  const shareCardRef = useRef<HTMLDivElement | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   const handleScan = async () => {
     if (!connected) {
@@ -88,6 +102,15 @@ const Dashboard = () => {
     prevConnected.current = connected;
   }, [connected]);
 
+  const selectedKey = useMemo(
+    () => selected.map((account) => account.id).join("|"),
+    [selected]
+  );
+
+  useEffect(() => {
+    if (!reclaiming) resetSimulation();
+  }, [selectedKey, reclaiming, resetSimulation]);
+
   const handleReclaim = async () => {
     try {
       trackEvent("reclaim_started", { accounts: selected.length });
@@ -99,6 +122,35 @@ const Dashboard = () => {
       void reclaimResult;
     } catch {
       // Errors are already surfaced via Sonner toasts in the hook.
+    }
+  };
+
+  const handleShare = async () => {
+    if (!result || !shareCardRef.current) return;
+    setSharing(true);
+    try {
+      const canvas = await html2canvas(shareCardRef.current, {
+        backgroundColor: null,
+        scale: 2,
+      });
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      if (!blob) throw new Error("Failed to create image");
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `harvest-reclaim-${new Date()
+        .toISOString()
+        .slice(0, 10)}.png`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Download started");
+    } catch {
+      toast.error("Could not generate share card");
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -115,6 +167,76 @@ const Dashboard = () => {
 
   // How many tx batches will be needed
   const batchCount = Math.ceil(selected.length / CLOSE_ACCOUNTS_BATCH_SIZE);
+
+  const solPriceUsd = Number(import.meta.env.VITE_SOL_PRICE_USD);
+  const hasUsdPrice = Number.isFinite(solPriceUsd) && solPriceUsd > 0;
+
+  const usdFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 2,
+      }),
+    []
+  );
+  const solFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 6,
+      }),
+    []
+  );
+  const shareDateLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+    []
+  );
+  const [animatedUsdText, setAnimatedUsdText] = useState(() =>
+    usdFormatter.format(0)
+  );
+  const [animatedSolText, setAnimatedSolText] = useState(() =>
+    solFormatter.format(0)
+  );
+
+  const reclaimedUsd =
+    result && hasUsdPrice ? result.reclaimedSol * solPriceUsd : null;
+
+  useEffect(() => {
+    if (!result) {
+      setAnimatedUsdText(usdFormatter.format(0));
+      setAnimatedSolText(solFormatter.format(0));
+      return;
+    }
+    if (hasUsdPrice) {
+      const controls = animate(0, reclaimedUsd ?? 0, {
+        duration: 1.2,
+        ease: "easeOut",
+        onUpdate: (value) => setAnimatedUsdText(usdFormatter.format(value)),
+      });
+      return () => controls.stop();
+    }
+    const controls = animate(0, result.reclaimedSol, {
+      duration: 1.2,
+      ease: "easeOut",
+      onUpdate: (value) => setAnimatedSolText(solFormatter.format(value)),
+    });
+    return () => controls.stop();
+  }, [result, hasUsdPrice, reclaimedUsd, usdFormatter, solFormatter]);
+
+  const selectedToken2022Count = selected.filter(
+    (account) => account.program === "token-2022"
+  ).length;
+  const selectedLegacyCount = selected.length - selectedToken2022Count;
+  const destination = publicKey?.toBase58();
+  const destinationShort = destination
+    ? `${destination.slice(0, 4)}…${destination.slice(-4)}`
+    : "your wallet";
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -387,6 +509,87 @@ const Dashboard = () => {
                   </motion.div>
                 )}
 
+                <div className="mb-5 rounded-xl border border-border bg-muted/30 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <ShieldCheck size={14} className="text-secondary" />
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      Preview & Safety
+                    </p>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    You're closing {selected.length} empty account
+                    {selected.length !== 1 ? "s" : ""} (
+                    {selectedLegacyCount} Token, {selectedToken2022Count} Token-2022).
+                    Rent refunds go to {destinationShort}. No token transfers.
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 size={16} className="text-secondary mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          Only empty accounts
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          We filter zero-balance accounts before closing.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <ShieldCheck size={16} className="text-secondary mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          Refunds to your wallet
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Destination: {destinationShort}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 size={16} className="text-secondary mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          No token transfers
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Only rent lamports are reclaimed.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      {simulationStatus === "running" ? (
+                        <Loader2
+                          size={16}
+                          className="text-primary mt-0.5 animate-spin"
+                        />
+                      ) : simulationStatus === "passed" ? (
+                        <CheckCircle2 size={16} className="text-secondary mt-0.5" />
+                      ) : simulationStatus === "failed" ? (
+                        <AlertTriangle
+                          size={16}
+                          className="text-destructive mt-0.5"
+                        />
+                      ) : (
+                        <Info size={16} className="text-muted-foreground mt-0.5" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          Simulation
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {simulationStatus === "passed"
+                            ? "Simulation passed. Safe to sign."
+                            : simulationStatus === "running"
+                            ? "Running simulation before signing."
+                            : simulationStatus === "failed"
+                            ? "Simulation failed. Please retry."
+                            : "We simulate every transaction before signing."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div>
                     <p className="text-sm text-muted-foreground">
@@ -402,7 +605,11 @@ const Dashboard = () => {
                       {totalReclaimableSol.toFixed(6)} SOL
                     </motion.p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      ≈ ${(totalReclaimableSol * 140).toFixed(2)} USD
+                      {hasUsdPrice
+                        ? `≈ ${usdFormatter.format(
+                            totalReclaimableSol * solPriceUsd
+                          )}`
+                        : "USD estimate unavailable"}
                     </p>
                   </div>
 
@@ -453,7 +660,20 @@ const Dashboard = () => {
 
               <div className="text-center">
                 <p className="font-display font-bold text-2xl text-foreground">
-                  {result.reclaimedSol.toFixed(6)} SOL Reclaimed!
+                  {hasUsdPrice ? (
+                    <>
+                      <span>{animatedUsdText}</span> reclaimed!
+                    </>
+                  ) : (
+                    <>
+                      <span>{animatedSolText}</span> SOL reclaimed!
+                    </>
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {hasUsdPrice
+                    ? `≈ ${solFormatter.format(result.reclaimedSol)} SOL`
+                    : "USD estimate unavailable"}
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
                   {result.closedCount} account
@@ -461,6 +681,19 @@ const Dashboard = () => {
                   {result.signatures.length} transaction
                   {result.signatures.length !== 1 ? "s" : ""}
                 </p>
+              </div>
+
+              <div
+                style={{ position: "fixed", left: "-10000px", top: 0 }}
+                aria-hidden
+              >
+                <ShareCard
+                  ref={shareCardRef}
+                  reclaimedSol={result.reclaimedSol}
+                  reclaimedUsd={reclaimedUsd}
+                  closedCount={result.closedCount}
+                  dateLabel={shareDateLabel}
+                />
               </div>
 
               {/* Transaction links */}
@@ -481,6 +714,15 @@ const Dashboard = () => {
                   </a>
                 ))}
               </div>
+
+              <button
+                onClick={handleShare}
+                disabled={sharing}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all font-medium text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Download size={16} />
+                {sharing ? "Preparing…" : "Download Card"}
+              </button>
 
               {/* Scan again if there are still accounts remaining */}
               {accounts.length > 0 && (
