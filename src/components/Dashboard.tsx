@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTokenAccounts } from "@/hooks/useTokenAccounts";
 import { useReclaimAccounts } from "@/hooks/useReclaimAccounts";
+import { useStake, type LiquidProvider } from "@/hooks/useStake";
 import { CLOSE_ACCOUNTS_BATCH_SIZE, EXPLORER_BASE } from "@/lib/constants";
 import { trackEvent } from "@/lib/analytics";
 import ShareCard from "@/components/ShareCard";
@@ -59,6 +60,7 @@ const Dashboard = () => {
     selected,
     totalReclaimableSol,
     allSelected,
+    skippedWithheldCount,
   } = useTokenAccounts();
 
   const {
@@ -70,12 +72,19 @@ const Dashboard = () => {
     resetSimulation,
   } = useReclaimAccounts();
 
+  const { staking, stakeLiquid } = useStake();
+
   // Track whether the initial "idle" state has been left
   const [started, setStarted] = useState(false);
   const prevConnected = useRef(connected);
   const lastReclaimId = useRef<string>("");
   const shareCardRef = useRef<HTMLDivElement | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [liquidProvider, setLiquidProvider] =
+    useState<LiquidProvider>("marinade");
+  const [stakeAmountSol, setStakeAmountSol] = useState("");
+  const [keepFeeBuffer, setKeepFeeBuffer] = useState(true);
+  const [lastStakeSig, setLastStakeSig] = useState<string | null>(null);
 
   const handleScan = async () => {
     if (!connected) {
@@ -165,6 +174,65 @@ const Dashboard = () => {
     });
   }, [result]);
 
+  useEffect(() => {
+    if (result) {
+      setKeepFeeBuffer(true);
+    }
+  }, [result]);
+
+  const feeBufferSol = 0.01;
+  const maxStakeableSol = result
+    ? Math.max(result.reclaimedSol - feeBufferSol, 0)
+    : 0;
+
+  useEffect(() => {
+    if (!result) {
+      setStakeAmountSol("");
+      setLastStakeSig(null);
+      setKeepFeeBuffer(true);
+      return;
+    }
+    const base = keepFeeBuffer ? maxStakeableSol : result.reclaimedSol;
+    setStakeAmountSol(base > 0 ? base.toFixed(4) : "");
+    setLastStakeSig(null);
+  }, [result, keepFeeBuffer, maxStakeableSol]);
+
+  const applyStakePreset = (useBuffer: boolean) => {
+    if (!result) return;
+    setKeepFeeBuffer(useBuffer);
+    const base = useBuffer ? maxStakeableSol : result.reclaimedSol;
+    setStakeAmountSol(base > 0 ? base.toFixed(4) : "");
+  };
+
+  const handleStake = async () => {
+    if (!result) return;
+    const amount = Number(stakeAmountSol);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid stake amount");
+      return;
+    }
+    if (amount - result.reclaimedSol > 0.000001) {
+      toast.error("Amount exceeds reclaimed SOL");
+      return;
+    }
+
+    try {
+      trackEvent("stake_started", { mode: "liquid", amount, provider: liquidProvider });
+      const stakeResult = await stakeLiquid({
+        amountSol: amount,
+        provider: liquidProvider,
+      });
+      setLastStakeSig(stakeResult.signature);
+      trackEvent("stake_liquid_complete", {
+        amount,
+        provider: liquidProvider,
+        signature: stakeResult.signature,
+      });
+    } catch {
+      // Errors are surfaced via toasts inside the hook
+    }
+  };
+
   // How many tx batches will be needed
   const batchCount = Math.ceil(selected.length / CLOSE_ACCOUNTS_BATCH_SIZE);
 
@@ -206,6 +274,13 @@ const Dashboard = () => {
 
   const reclaimedUsd =
     result && hasUsdPrice ? result.reclaimedSol * solPriceUsd : null;
+  const liquidEnabled =
+    liquidProvider === "marinade" || liquidProvider === "jito";
+  const stakeAmountValue = Number(stakeAmountSol);
+  const stakeAmountValid =
+    Number.isFinite(stakeAmountValue) && stakeAmountValue > 0;
+  const canStake = stakeAmountValid && liquidEnabled;
+  const stakeButtonLabel = staking ? "Staking..." : "Stake It Now";
 
   useEffect(() => {
     if (!result) {
@@ -357,6 +432,13 @@ const Dashboard = () => {
                 <p className="text-sm text-muted-foreground mt-2">
                   No empty token accounts found in this wallet.
                 </p>
+                {skippedWithheldCount > 0 && (
+                  <p className="text-xs text-amber-400 mt-2">
+                    Skipped {skippedWithheldCount} Token-2022 account
+                    {skippedWithheldCount !== 1 ? "s" : ""} with withheld fees.
+                    Only the mint authority can close those.
+                  </p>
+                )}
                 <p className="text-sm text-secondary font-semibold mt-2">
                   Buy more tickers man.
                 </p>
@@ -403,6 +485,13 @@ const Dashboard = () => {
                     </span>{" "}
                     recoverable
                   </p>
+                  {skippedWithheldCount > 0 && (
+                    <p className="text-xs text-amber-400 mt-2">
+                      Skipped {skippedWithheldCount} Token-2022 account
+                      {skippedWithheldCount !== 1 ? "s" : ""} with withheld fees
+                      (mint authority required).
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   <button
@@ -710,9 +799,101 @@ const Dashboard = () => {
                     {result.signatures.length > 1
                       ? `Tx ${i + 1}: `
                       : "View on Solscan: "}
-                    {sig.slice(0, 8)}…{sig.slice(-6)}
+                    {sig.slice(0, 8)}...{sig.slice(-6)}
                   </a>
                 ))}
+              </div>
+
+              <div className="w-full max-w-xl rounded-xl border border-border bg-muted/30 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Stake Reclaimed SOL
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Put your reclaimed SOL to work with one click.
+                  </p>
+                </div>
+
+                <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      Amount (SOL)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={stakeAmountSol}
+                      onChange={(e) => setStakeAmountSol(e.target.value)}
+                      placeholder="0.00"
+                      className="mt-2 w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        onClick={() => applyStakePreset(true)}
+                        className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+                          keepFeeBuffer
+                            ? "bg-secondary/15 border-secondary/40 text-secondary"
+                            : "border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Keep 0.01 SOL for fees
+                      </button>
+                      <button
+                        onClick={() => applyStakePreset(false)}
+                        className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+                          !keepFeeBuffer
+                            ? "bg-secondary/15 border-secondary/40 text-secondary"
+                            : "border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Use full amount
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      Liquid Provider
+                    </label>
+                    <select
+                      value={liquidProvider}
+                      onChange={(e) =>
+                        setLiquidProvider(e.target.value as LiquidProvider)
+                      }
+                      className="mt-2 w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      <option value="marinade">Marinade (mSOL)</option>
+                      <option value="jito">Jito (jitoSOL)</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground mt-2">
+                      {liquidProvider === "marinade"
+                        ? "Stake SOL and receive mSOL."
+                        : "Stake SOL and receive jitoSOL."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    onClick={handleStake}
+                    disabled={!canStake || staking}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground font-display font-semibold btn-glow disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {stakeButtonLabel}
+                  </button>
+
+                  {lastStakeSig && (
+                    <a
+                      href={`${EXPLORER_BASE}/${lastStakeSig}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors font-mono"
+                    >
+                      View stake tx
+                    </a>
+                  )}
+                </div>
               </div>
 
               <button
@@ -721,7 +902,7 @@ const Dashboard = () => {
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all font-medium text-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Download size={16} />
-                {sharing ? "Preparing…" : "Download Card"}
+                {sharing ? "Preparing..." : "Download Card"}
               </button>
 
               {/* Scan again if there are still accounts remaining */}

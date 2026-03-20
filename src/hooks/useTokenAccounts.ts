@@ -17,6 +17,7 @@ import {
   lamportsToSol,
   type EmptyTokenAccount,
 } from "@/lib/solana";
+import { RPC_LABEL } from "@/lib/constants";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,22 +49,25 @@ export function useTokenAccounts() {
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
+  const [skippedWithheldCount, setSkippedWithheldCount] = useState(0);
 
   // ── Main scan function ────────────────────────────────────────────────────
 
   const scan = useCallback(async () => {
     if (!publicKey || !connected) return;
 
+    const label = `[${RPC_LABEL}] scan`;
+    console.time(label);
     setScanning(true);
     setError(null);
     setAccounts([]);
+    setSkippedWithheldCount(0);
 
     try {
       // Step 1: Fetch all zero-balance accounts from both token programs
-      const raw: EmptyTokenAccount[] = await scanEmptyTokenAccounts(
-        connection,
-        publicKey
-      );
+      const { accounts: raw, skippedWithheldFeeAccounts } =
+        await scanEmptyTokenAccounts(connection, publicKey);
+      setSkippedWithheldCount(skippedWithheldFeeAccounts);
 
       if (raw.length === 0) {
         setAccounts([]);
@@ -103,6 +107,7 @@ export function useTokenAccounts() {
       setError(message);
     } finally {
       setScanning(false);
+      console.timeEnd(label);
     }
   }, [connection, publicKey, connected]);
 
@@ -131,6 +136,7 @@ export function useTokenAccounts() {
     setAccounts([]);
     setHasScanned(false);
     setError(null);
+    setSkippedWithheldCount(0);
   }, []);
 
   // ── Derived values ────────────────────────────────────────────────────────
@@ -155,5 +161,6 @@ export function useTokenAccounts() {
     selected,
     totalReclaimableSol,
     allSelected,
+    skippedWithheldCount,
   };
 }

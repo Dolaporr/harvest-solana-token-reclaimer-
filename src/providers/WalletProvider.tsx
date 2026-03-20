@@ -24,7 +24,7 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { RPC_URL } from "@/lib/constants";
+import { RPC_URL, RPC_WS_URL } from "@/lib/constants";
 
 // Import the default wallet-adapter modal styles.
 // This can be overridden with custom CSS if needed.
@@ -50,6 +50,8 @@ export function WalletProvider({ children }: Props) {
         // "confirmed" commitment: blocks are confirmed by >2/3 of validators.
         // Faster than "finalized" (~32 slots) but more reliable than "processed".
         commitment: "confirmed",
+        // Optional WebSocket endpoint for providers that support it.
+        wsEndpoint: RPC_WS_URL,
         // Disable WebSocket — we use HTTP polling for simplicity and Helius
         // free-tier compatibility. Enable wsEndpoint for real-time subscriptions.
         disableRetryOnRateLimit: false,

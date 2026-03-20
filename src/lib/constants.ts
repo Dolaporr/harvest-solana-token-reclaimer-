@@ -14,12 +14,30 @@
  */
 const HELIUS_API_KEY = import.meta.env.VITE_HELIUS_API_KEY;
 const HELIUS_RPC_URL = import.meta.env.VITE_HELIUS_RPC_URL;
+const RPC_PROVIDER = (import.meta.env.VITE_RPC_PROVIDER || "helius").toLowerCase();
 
-export const RPC_URL =
+const HELIUS_URL =
   HELIUS_RPC_URL ||
   (HELIUS_API_KEY
     ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-    : "https://api.mainnet-beta.solana.com");
+    : undefined);
+
+const PROVIDERS: Record<string, string | undefined> = {
+  helius: HELIUS_URL,
+  triton: import.meta.env.VITE_TRITON_RPC_URL,
+  quicknode: import.meta.env.VITE_QUICKNODE_RPC_URL,
+};
+
+const FALLBACK_URL = HELIUS_URL || "https://api.mainnet-beta.solana.com";
+
+export const RPC_URL = PROVIDERS[RPC_PROVIDER] || FALLBACK_URL;
+export const RPC_LABEL = PROVIDERS[RPC_PROVIDER] ? RPC_PROVIDER : "helius";
+export const RPC_WS_URL =
+  RPC_PROVIDER === "triton"
+    ? import.meta.env.VITE_TRITON_WS_URL
+    : RPC_PROVIDER === "quicknode"
+    ? import.meta.env.VITE_QUICKNODE_WS_URL
+    : undefined;
 
 /**
  * Standard SPL Token Account rent-exemption amount.

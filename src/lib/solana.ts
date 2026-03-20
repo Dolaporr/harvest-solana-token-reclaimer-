@@ -38,6 +38,11 @@ export interface EmptyTokenAccount {
   rentLamports: number;
 }
 
+export interface ScanResult {
+  accounts: EmptyTokenAccount[];
+  skippedWithheldFeeAccounts: number;
+}
+
 export interface TokenMetadata {
   name: string;
   symbol: string;
@@ -59,12 +64,69 @@ export interface TokenMetadata {
 export async function scanEmptyTokenAccounts(
   connection: Connection,
   owner: PublicKey
-): Promise<EmptyTokenAccount[]> {
+): Promise<ScanResult> {
   const programs: Array<{ id: PublicKey; label: EmptyTokenAccount["program"] }> =
     [
       { id: TOKEN_PROGRAM_ID, label: "token" },
       { id: TOKEN_2022_PROGRAM_ID, label: "token-2022" },
     ];
+
+  const toBigInt = (value: unknown): bigint => {
+    if (value === null || value === undefined) return 0n;
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number" && Number.isFinite(value))
+      return BigInt(Math.floor(value));
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return 0n;
+      try {
+        return BigInt(trimmed);
+      } catch {
+        return 0n;
+      }
+    }
+    if (typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      return toBigInt(
+        obj.amount ??
+          obj.uiAmountString ??
+          obj.uiAmount ??
+          obj.value ??
+          obj.raw
+      );
+    }
+    return 0n;
+  };
+
+  const getWithheldAmount = (info: Record<string, unknown>): bigint => {
+    const direct = toBigInt(
+      (info as { withheldAmount?: unknown }).withheldAmount ??
+        (info as { withheld_amount?: unknown }).withheld_amount
+    );
+    if (direct > 0n) return direct;
+
+    const extensions = Array.isArray((info as { extensions?: unknown }).extensions)
+      ? (info as { extensions: Array<Record<string, unknown>> }).extensions
+      : [];
+
+    for (const extension of extensions) {
+      const name =
+        (extension.extension as string | undefined) ??
+        (extension.type as string | undefined) ??
+        (extension.name as string | undefined);
+      if (name !== "transferFeeAmount") continue;
+
+      const state =
+        (extension.state as Record<string, unknown> | undefined) ?? extension;
+      const withheld = toBigInt(
+        (state as { withheldAmount?: unknown }).withheldAmount ??
+          (state as { withheld_amount?: unknown }).withheld_amount
+      );
+      if (withheld > 0n) return withheld;
+    }
+
+    return 0n;
+  };
 
   // Fire both RPC calls in parallel
   const results = await Promise.all(
@@ -75,6 +137,7 @@ export async function scanEmptyTokenAccounts(
         });
 
       const empty: EmptyTokenAccount[] = [];
+      let skippedWithheldFeeAccounts = 0;
 
       for (const { pubkey, account } of accounts) {
         const parsed = account.data?.parsed?.info;
@@ -86,6 +149,14 @@ export async function scanEmptyTokenAccounts(
         const rawAmount: string = parsed.tokenAmount?.amount ?? "1";
         if (rawAmount !== "0") continue;
 
+        if (label === "token-2022") {
+          const withheld = getWithheldAmount(parsed as Record<string, unknown>);
+          if (withheld > 0n) {
+            skippedWithheldFeeAccounts += 1;
+            continue;
+          }
+        }
+
         empty.push({
           pubkey,
           mint: parsed.mint as string,
@@ -94,11 +165,17 @@ export async function scanEmptyTokenAccounts(
         });
       }
 
-      return empty;
+      return { empty, skippedWithheldFeeAccounts };
     })
   );
 
-  return results.flat();
+  return {
+    accounts: results.flatMap((result) => result.empty),
+    skippedWithheldFeeAccounts: results.reduce(
+      (sum, result) => sum + result.skippedWithheldFeeAccounts,
+      0
+    ),
+  };
 }
 
 // ─── 2. Token Metadata (Helius DAS API) ─────────────────────────────────────

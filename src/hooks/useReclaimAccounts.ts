@@ -11,11 +11,15 @@
 //   7. Fires Sonner toasts at each stage for real-time feedback
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { toast } from "sonner";
 import { buildCloseAccountTxs, simulateTx } from "@/lib/solana";
-import { CLOSE_ACCOUNTS_BATCH_SIZE, EXPLORER_BASE } from "@/lib/constants";
+import {
+  CLOSE_ACCOUNTS_BATCH_SIZE,
+  EXPLORER_BASE,
+  RPC_LABEL,
+} from "@/lib/constants";
 import type { DisplayAccount } from "./useTokenAccounts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -31,6 +35,7 @@ export interface ReclaimResult {
 export function useReclaimAccounts() {
   const { connection } = useConnection();
   const { publicKey, signAllTransactions } = useWallet();
+  const runIdRef = useRef(0);
 
   const [reclaiming, setReclaiming] = useState(false);
   const [result, setResult] = useState<ReclaimResult | null>(null);
@@ -57,6 +62,11 @@ export function useReclaimAccounts() {
       const batchCount = Math.ceil(
         selectedAccounts.length / CLOSE_ACCOUNTS_BATCH_SIZE
       );
+
+      const runId = ++runIdRef.current;
+      const labelPrefix = `[${RPC_LABEL} #${runId}]`;
+      const overallLabel = `${labelPrefix} reclaim`;
+      console.time(overallLabel);
 
       const toastId = toast.loading(
         `Preparing ${selectedAccounts.length} account${selectedAccounts.length > 1 ? "s" : ""} across ${batchCount} transaction${batchCount > 1 ? "s" : ""}…`
@@ -86,6 +96,8 @@ export function useReclaimAccounts() {
         );
 
         setSimulationStatus("running");
+        const simLabel = `${labelPrefix} simulate`;
+        console.time(simLabel);
         try {
           await Promise.all(
             transactions.map((tx) => simulateTx(connection, tx))
@@ -94,6 +106,8 @@ export function useReclaimAccounts() {
         } catch (err) {
           setSimulationStatus("failed");
           throw err;
+        } finally {
+          console.timeEnd(simLabel);
         }
 
         // ── Step 4: Request wallet signatures ───────────────────────────────
@@ -115,7 +129,10 @@ export function useReclaimAccounts() {
 
         const signatures: string[] = [];
 
-        for (let i = 0; i < signedTxs.length; i++) {
+        const sendLabel = `${labelPrefix} send`;
+        console.time(sendLabel);
+        try {
+          for (let i = 0; i < signedTxs.length; i++) {
           toast.loading(
             `Sending batch ${i + 1} of ${signedTxs.length}…`,
             { id: toastId }
@@ -129,19 +146,28 @@ export function useReclaimAccounts() {
           );
           signatures.push(sig);
         }
+        } finally {
+          console.timeEnd(sendLabel);
+        }
 
         // ── Step 6: Confirm all transactions ────────────────────────────────
         // Concurrent confirmation — no need to wait for each one sequentially.
         toast.loading("Confirming on-chain…", { id: toastId });
 
-        await Promise.all(
-          signatures.map((sig) =>
-            connection.confirmTransaction(
-              { signature: sig, blockhash, lastValidBlockHeight },
-              "confirmed"
+        const confirmLabel = `${labelPrefix} confirm`;
+        console.time(confirmLabel);
+        try {
+          await Promise.all(
+            signatures.map((sig) =>
+              connection.confirmTransaction(
+                { signature: sig, blockhash, lastValidBlockHeight },
+                "confirmed"
+              )
             )
-          )
-        );
+          );
+        } finally {
+          console.timeEnd(confirmLabel);
+        }
 
         // ── Step 7: Report success ───────────────────────────────────────────
         const reclaimedSol = selectedAccounts.reduce(
@@ -190,6 +216,7 @@ export function useReclaimAccounts() {
         throw err; // Re-throw so Dashboard can handle UI state
       } finally {
         setReclaiming(false);
+        console.timeEnd(overallLabel);
       }
     },
     [connection, publicKey, signAllTransactions]
