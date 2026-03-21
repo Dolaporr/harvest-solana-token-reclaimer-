@@ -894,6 +894,18 @@ const Dashboard = () => {
                     </a>
                   )}
                 </div>
+
+                <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Want to support Layer33?</span>
+                  <a
+                    href="https://www.layer33.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:text-primary/80 transition-colors font-semibold"
+                  >
+                    Stake with Layer33
+                  </a>
+                </div>
               </div>
 
               <button
